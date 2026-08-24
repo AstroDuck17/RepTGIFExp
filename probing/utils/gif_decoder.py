@@ -37,9 +37,9 @@ def _normalize_frame(frame: np.ndarray) -> np.ndarray:
     Normalize a single GIF frame to uint8 RGB [H, W, 3].
     Handles: grayscale [H,W], RGBA [H,W,4], standard RGB [H,W,3].
     """
-    if frame.ndim == 2:                        # grayscale → RGB
+    if frame.ndim == 2:                              # grayscale → RGB
         frame = np.stack([frame] * 3, axis=-1)
-    if frame.ndim == 3 and frame.shape[-1] == 4:   # RGBA → RGB
+    if frame.ndim == 3 and frame.shape[-1] == 4:    # RGBA → RGB
         frame = frame[..., :3]
     return frame.astype(np.uint8)
 
@@ -48,7 +48,12 @@ def _resize_frame_np(frame: np.ndarray, size: int) -> np.ndarray:
     """Resize a single [H, W, C] uint8 numpy frame to (size, size) using PIL."""
     from PIL import Image
     img = Image.fromarray(frame)
-    img = img.resize((size, size), Image.BILINEAR)
+    # Use Resampling.BILINEAR (Pillow >= 9.1) with fallback for older versions
+    try:
+        resample = Image.Resampling.BILINEAR
+    except AttributeError:
+        resample = Image.BILINEAR  # type: ignore[attr-defined]
+    img = img.resize((size, size), resample)
     return np.asarray(img, dtype=np.uint8)
 
 
@@ -162,14 +167,14 @@ def load_gif(
     import torch
 
     # Load as list — safe for variable-size frames
-    frames_list = load_gif_frames_raw(gif_path)  # list of [H_i, W_i, 3]
+    frames_list = load_gif_frames_raw(gif_path)  # list of [H_i, W_i, 3] uint8
     T = len(frames_list)
 
     # Handle short GIFs
     if T < min_frames:
         if not pad_short:
             raise ValueError(f"GIF has only {T} frames (min={min_frames}): {gif_path}")
-        # Loop-pad by repeating from start
+        # Loop-pad by repeating from start until we have enough frames
         while len(frames_list) < min_frames:
             frames_list = frames_list + frames_list
         frames_list = frames_list[:min_frames]
@@ -180,12 +185,12 @@ def load_gif(
     # Process each selected frame individually — handles varying H_i x W_i safely
     processed = []
     for idx in indices:
-        frame = frames_list[int(idx)]              # [H_i, W_i, 3] uint8
-        t = torch.from_numpy(frame.copy()).permute(2, 0, 1).float() / 255.0  # [C, H, W]
-        t = TF.resize(t.unsqueeze(0), [img_size, img_size], antialias=True).squeeze(0)
+        frame = frames_list[int(idx)]                                         # [H_i, W_i, 3] uint8
+        t = torch.from_numpy(frame.copy()).permute(2, 0, 1).float() / 255.0  # [C, H_i, W_i]
+        t = TF.resize(t.unsqueeze(0), [img_size, img_size], antialias=True).squeeze(0)  # [C, S, S]
         processed.append(t)
 
-    tensor = torch.stack(processed, dim=0)  # [n_frames, C, H, W]
+    tensor = torch.stack(processed, dim=0)  # [n_frames, C, img_size, img_size]
 
     # ImageNet normalization
     mean_t = torch.tensor(mean).view(1, 3, 1, 1)
@@ -194,10 +199,6 @@ def load_gif(
 
 
 def get_gif_frame_count(gif_path: str | Path) -> int:
-                return props.n_images
-    except Exception:
-        pass
-
-    # Fallback: full decode and count
+    """Returns the number of frames in a GIF."""
     frames = load_gif_frames_raw(gif_path)
     return len(frames)

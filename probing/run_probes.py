@@ -257,6 +257,7 @@ def run_probes(
 
             # ── Grid search ────────────────────────────────────────
             best_val_bal_acc = -1.0
+            best_val_bce_gs  = float("inf")   # BCE of the best config (tie-break)
             best_probe       = None
             best_hp          = {}
 
@@ -279,15 +280,19 @@ def run_probes(
                     device=device,
                 )
 
-                improved = (val_info["val_bal_acc"] > best_val_bal_acc) or (
-                    val_info["val_bal_acc"] == best_val_bal_acc
-                    and val_info["val_bce"] < best_probe.bce if best_probe else False
+                curr_bal_acc = val_info["val_bal_acc"]
+                curr_bce     = val_info["val_bce"]
+
+                # Primary: higher balanced_acc; secondary tie-break: lower BCE
+                is_better = (
+                    curr_bal_acc > best_val_bal_acc
+                    or (curr_bal_acc == best_val_bal_acc and curr_bce < best_val_bce_gs)
                 )
-                if val_info["val_bal_acc"] > best_val_bal_acc:
-                    best_val_bal_acc = val_info["val_bal_acc"]
-                    best_probe = trained_probe
-                    best_probe.bce = val_info["val_bce"]  # tag for tie-break
-                    best_hp = {"optimizer": opt_name, "lr": lr, "weight_decay": wd}
+                if is_better:
+                    best_val_bal_acc = curr_bal_acc
+                    best_val_bce_gs  = curr_bce
+                    best_probe       = trained_probe
+                    best_hp          = {"optimizer": opt_name, "lr": lr, "weight_decay": wd}
 
             # ── Test evaluation ────────────────────────────────────
             best_probe.eval()
@@ -327,14 +332,15 @@ def run_probes(
     results_df = pd.DataFrame(fold_layer_rows)
     results_df.to_csv(out_dir / "fold_layer_results.csv", index=False)
 
-    # Layer summary
+    # Layer summary — aggregate metrics per layer across folds
     metric_cols = ["test_accuracy", "test_balanced_acc", "test_roc_auc", "test_bce_loss"]
-    layer_summary = (
+    agg_df = (
         results_df.groupby(["layer_idx", "layer_fraction"])[metric_cols]
         .agg(["mean", "std"])
-        .reset_index()
     )
-    layer_summary.columns = ["_".join(c).strip("_") for c in layer_summary.columns]
+    # Flatten MultiIndex columns: ('test_balanced_acc', 'mean') → 'test_balanced_acc_mean'
+    agg_df.columns = [f"{col}_{stat}" for col, stat in agg_df.columns]
+    layer_summary = agg_df.reset_index()
     layer_summary.to_csv(out_dir / "layer_summary.csv", index=False)
 
     # OOF predictions

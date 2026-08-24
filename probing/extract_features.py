@@ -194,7 +194,8 @@ def extract_features(config: dict, manifest_path: Optional[str] = None, force: b
     )
     cache_dir = artifacts_dir / "features" / cache_name / mdl_cfg["short_name"]
     cache_dir.mkdir(parents=True, exist_ok=True)
-    cache_path = cache_dir / "pooled.npy"
+    cache_path      = cache_dir / "pooled.npy"
+    done_mask_path  = cache_dir / "done_rows.npy"   # separate exact tracking file
 
     # ── Load model ─────────────────────────────────────────────────
     dtype_map = {"float32": torch.float32, "float16": torch.float16}
@@ -215,23 +216,23 @@ def extract_features(config: dict, manifest_path: Optional[str] = None, force: b
     expected_shape = (N, n_layers, hidden_dim)
     done_mask = np.zeros(N, dtype=bool)
 
-    if cache_path.exists() and not force:
+    if cache_path.exists() and done_mask_path.exists() and not force:
         existing = np.load(cache_path, mmap_mode="r")
         if existing.shape == expected_shape:
             print(f"\n  Found existing cache: {cache_path}")
-            # Mark rows with non-zero content as done
-            # (all-zero rows = not yet extracted)
-            sums = existing.reshape(N, -1).sum(axis=1)
-            done_mask = (sums != 0)
+            done_mask = np.load(done_mask_path)  # exact boolean mask
             n_done = done_mask.sum()
             print(f"  Resuming: {n_done}/{N} already extracted, {N - n_done} remaining.")
             features = np.copy(existing)
             del existing
         else:
             print(f"  Shape mismatch ({existing.shape} vs {expected_shape}). Re-extracting.")
-            features = np.zeros(expected_shape, dtype=np.float32)
+            del existing
+            features  = np.zeros(expected_shape, dtype=np.float32)
+            done_mask = np.zeros(N, dtype=bool)
     else:
-        features = np.zeros(expected_shape, dtype=np.float32)
+        features  = np.zeros(expected_shape, dtype=np.float32)
+        done_mask = np.zeros(N, dtype=bool)
 
     # ── Extraction loop ────────────────────────────────────────────
     n_todo = int((~done_mask).sum())
@@ -283,10 +284,12 @@ def extract_features(config: dict, manifest_path: Optional[str] = None, force: b
         # Checkpoint every 500 videos
         if (i + 1) % 500 == 0:
             np.save(cache_path, features)
+            np.save(done_mask_path, done_mask)
             print(f"  Checkpoint saved → {cache_path}")
 
     # ── Final save ─────────────────────────────────────────────────
     np.save(cache_path, features)
+    np.save(done_mask_path, done_mask)
 
     # Save extraction metadata
     meta = {
