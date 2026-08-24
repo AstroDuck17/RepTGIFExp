@@ -1,0 +1,73 @@
+# =============================================================================
+# pyproject.toml — Repetition Probing Pipeline
+# For use with `uv` (https://github.com/astral-sh/uv)
+#
+# Usage:
+#   uv venv .venv
+#   uv pip install -e ".[cuda]"    # GPU cluster (CUDA 12.1)
+#   uv pip install -e ".[cpu]"     # CPU only (probe training, no extraction)
+#   uv pip install -e ".[all]"     # everything including dev tools
+# =============================================================================
+
+[project]
+name            = "rep-tgif-probing"
+version         = "0.1.0"
+description     = "Layer-wise probing of V-JEPA2 for repetition detection on TGIF-QA"
+requires-python = ">=3.10"
+
+# Core dependencies required by all scripts
+dependencies = [
+    "numpy>=1.24.0",
+    "pandas>=2.0.0",
+    "pyarrow>=12.0.0",        # parquet read/write
+    "pyyaml>=6.0",            # config.yaml parsing
+    "scikit-learn>=1.3.0",    # StratifiedKFold in build_manifest.py
+    "imageio>=2.33.0",        # GIF decoding
+    "imageio-ffmpeg>=0.4.9",  # ffmpeg backend for imageio
+    "matplotlib>=3.7.0",      # layer curve plots
+    "transformers>=4.40.0",   # HuggingFace V-JEPA2 model loading
+    "huggingface-hub>=0.22.0",
+]
+
+[project.optional-dependencies]
+
+# GPU cluster install (CUDA 12.1) — use this on the remote server
+cuda = [
+    "torch>=2.1.0",
+    "torchvision>=0.16.0",
+]
+
+# CPU-only install — for probe training without a GPU
+cpu = [
+    "torch>=2.1.0",
+    "torchvision>=0.16.0",
+]
+
+# Development extras
+dev = [
+    "ipython",
+    "jupyter",
+    "rich",    # pretty terminal output
+]
+
+# Everything
+all = [
+    "rep-tgif-probing[cuda,dev]",
+]
+
+[build-system]
+requires      = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["utils"]
+
+# =============================================================================
+# uv-specific: point torch to the CUDA 12.1 wheel index for GPU clusters.
+# Run this BEFORE `uv pip install -e ".[cuda]"`:
+#
+#   uv pip install torch torchvision \
+#       --index-url https://download.pytorch.org/whl/cu121
+#
+# Or add to uv.toml / .python-version as needed for your cluster.
+# =============================================================================

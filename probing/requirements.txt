@@ -1,0 +1,46 @@
+# =============================================================================
+# requirements.txt — Repetition Probing Pipeline
+# =============================================================================
+# Install with:
+#   pip install -r requirements.txt
+#
+# For PyTorch with CUDA (recommended for extract_features.py):
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+#   pip install -r requirements.txt
+#
+# For CPU-only (probe training only, no GPU extraction):
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+#   pip install -r requirements.txt
+# =============================================================================
+
+# ── Core numerics ─────────────────────────────────────────────────────────────
+numpy>=1.24.0
+pandas>=2.0.0
+
+# ── Parquet support for pandas (manifest.parquet, oof_predictions.parquet) ────
+pyarrow>=12.0.0
+
+# ── Config parsing ────────────────────────────────────────────────────────────
+pyyaml>=6.0
+
+# ── Cross-validation (build_manifest.py) ─────────────────────────────────────
+scikit-learn>=1.3.0
+
+# ── Deep learning (extract_features.py, run_probes.py) ───────────────────────
+# Install torch separately with the correct CUDA version (see header above).
+# These are listed here so pip resolves them, but the CUDA wheel must be chosen
+# manually for your cluster's GPU drivers.
+torch>=2.1.0
+torchvision>=0.16.0
+
+# ── HuggingFace model loading (extract_features.py) ──────────────────────────
+transformers>=4.40.0
+huggingface-hub>=0.22.0
+
+# ── GIF decoding (utils/gif_decoder.py) ──────────────────────────────────────
+# imageio with ffmpeg plugin handles GIF, MP4, and other formats.
+imageio>=2.33.0
+imageio-ffmpeg>=0.4.9
+
+# ── Plotting (plot_curves.py, run_probes.py) ─────────────────────────────────
+matplotlib>=3.7.0
