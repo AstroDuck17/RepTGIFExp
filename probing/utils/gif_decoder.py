@@ -3,6 +3,10 @@ utils/gif_decoder.py
 
 GIF frame sampling and preprocessing utilities.
 Supports: uniform, shuffle, center_repeat, reverse sampling strategies.
+
+Key design: frames are loaded ONE AT A TIME (not batch-stacked) to handle
+GIFs where individual frames have different spatial dimensions — which is
+valid per the GIF spec and common in TGIF-QA clips.
 """
 
 from __future__ import annotations
@@ -28,27 +32,59 @@ except ImportError:
 SamplingStrategy = Literal["uniform", "shuffle", "center_repeat", "reverse"]
 
 
-def load_gif_frames_raw(gif_path: str | Path) -> np.ndarray:
+def _normalize_frame(frame: np.ndarray) -> np.ndarray:
     """
-    Load all frames from a GIF as a uint8 numpy array of shape [T, H, W, C].
-    Falls back gracefully if imageio is not available.
+    Normalize a single GIF frame to uint8 RGB [H, W, 3].
+    Handles: grayscale [H,W], RGBA [H,W,4], standard RGB [H,W,3].
+    """
+    if frame.ndim == 2:                        # grayscale → RGB
+        frame = np.stack([frame] * 3, axis=-1)
+    if frame.ndim == 3 and frame.shape[-1] == 4:   # RGBA → RGB
+        frame = frame[..., :3]
+    return frame.astype(np.uint8)
+
+
+def _resize_frame_np(frame: np.ndarray, size: int) -> np.ndarray:
+    """Resize a single [H, W, C] uint8 numpy frame to (size, size) using PIL."""
+    from PIL import Image
+    img = Image.fromarray(frame)
+    img = img.resize((size, size), Image.BILINEAR)
+    return np.asarray(img, dtype=np.uint8)
+
+
+def load_gif_frames_raw(gif_path: str | Path) -> list[np.ndarray]:
+    """
+    Load all frames from a GIF as a LIST of [H_i, W_i, 3] uint8 arrays.
+
+    Deliberately returns a list (not a stacked array) because GIF frames
+    can have different spatial dimensions — stacking would raise:
+        "all input arrays must have the same shape"
+
+    Args:
+        gif_path: Path to the .gif file.
+
+    Returns:
+        List of np.ndarray, each [H_i, W_i, 3] uint8.
+        Note: H_i / W_i may vary across frames.
     """
     gif_path = str(gif_path)
 
     if _IMAGEIO_AVAILABLE:
-        frames = iio.imread(gif_path, index=None)  # [T, H, W, C] or [T, H, W]
-        if frames.ndim == 3:  # grayscale
-            frames = np.stack([frames] * 3, axis=-1)
-        # Some GIFs have RGBA — drop alpha channel
-        if frames.shape[-1] == 4:
-            frames = frames[..., :3]
-        return frames.astype(np.uint8)
+        frames = []
+        try:
+            for frame in iio.imiter(gif_path, plugin="pillow"):
+                frames.append(_normalize_frame(np.asarray(frame)))
+        except Exception as e:
+            raise RuntimeError(f"imageio failed to decode {gif_path}: {e}")
+        if not frames:
+            raise RuntimeError(f"No frames decoded from {gif_path}")
+        return frames
 
-    # Fallback: torchvision read_video (slower for GIFs but widely available)
+    # Fallback: torchvision read_video
     try:
         import torchvision.io as tvio
         video, _, _ = tvio.read_video(gif_path, pts_unit="sec")  # [T, H, W, C]
-        return video.numpy().astype(np.uint8)
+        return [video[i].numpy().astype(np.uint8) for i in range(len(video))]
     except Exception as e:
         raise RuntimeError(
             f"Cannot decode {gif_path}. Install imageio[ffmpeg] or torchvision. Error: {e}"
@@ -100,25 +136,6 @@ def sample_frame_indices(
     return indices
 
 
-def pad_frames_by_looping(frames: np.ndarray, target_length: int) -> np.ndarray:
-    """
-    Pad a frame array by looping (repeating from the start) to reach target_length.
-
-    Args:
-        frames: [T, H, W, C] uint8 array.
-        target_length: Desired number of frames.
-
-    Returns:
-        [target_length, H, W, C] uint8 array.
-    """
-    T = len(frames)
-    if T >= target_length:
-        return frames
-    repeats = (target_length // T) + 1
-    tiled = np.tile(frames, (repeats, 1, 1, 1))
-    return tiled[:target_length]
-
-
 def load_gif(
     gif_path: str | Path,
     n_frames: int = 16,
@@ -133,62 +150,50 @@ def load_gif(
     """
     Full GIF loading pipeline: decode → sample → resize → normalize.
 
-    Args:
-        gif_path: Path to the .gif file.
-        n_frames: Number of frames to sample.
-        strategy: Sampling strategy.
-        img_size: Spatial resize resolution (square).
-        mean: Normalization mean (per-channel).
-        std: Normalization std (per-channel).
-        min_frames: Skip/raise if GIF has fewer than this many frames.
-        pad_short: If True, loop-pad short GIFs. If False, raise on short GIFs.
-        seed: Random seed for shuffle strategy.
+    Each selected frame is resized INDIVIDUALLY to img_size x img_size before
+    stacking. This correctly handles variable-size GIF frames.
 
     Returns:
-        Float32 tensor of shape [T, C, H, W], ready for model input.
-        Values are in roughly [-2.3, 2.6] (normalized).
+        Float32 tensor of shape [n_frames, C, H, W], normalized with ImageNet stats.
     """
     if not _TORCH_AVAILABLE:
         raise RuntimeError("PyTorch is required for load_gif(). Install torch.")
 
-    frames_raw = load_gif_frames_raw(gif_path)  # [T, H, W, C], uint8
+    import torch
 
-    T = len(frames_raw)
+    # Load as list — safe for variable-size frames
+    frames_list = load_gif_frames_raw(gif_path)  # list of [H_i, W_i, 3]
+    T = len(frames_list)
+
+    # Handle short GIFs
     if T < min_frames:
         if not pad_short:
-            raise ValueError(
-                f"GIF has only {T} frames (min={min_frames}): {gif_path}"
-            )
-        frames_raw = pad_frames_by_looping(frames_raw, min_frames)
-        T = len(frames_raw)
+            raise ValueError(f"GIF has only {T} frames (min={min_frames}): {gif_path}")
+        # Loop-pad by repeating from start
+        while len(frames_list) < min_frames:
+            frames_list = frames_list + frames_list
+        frames_list = frames_list[:min_frames]
+        T = len(frames_list)
 
     indices = sample_frame_indices(T, n_frames, strategy, seed)
-    sampled = frames_raw[indices]  # [n_frames, H, W, C], uint8
 
-    # Convert to float tensor [n_frames, C, H, W] in [0, 1]
-    import torch
-    tensor = torch.from_numpy(sampled).permute(0, 3, 1, 2).float() / 255.0
+    # Process each selected frame individually — handles varying H_i x W_i safely
+    processed = []
+    for idx in indices:
+        frame = frames_list[int(idx)]              # [H_i, W_i, 3] uint8
+        t = torch.from_numpy(frame.copy()).permute(2, 0, 1).float() / 255.0  # [C, H, W]
+        t = TF.resize(t.unsqueeze(0), [img_size, img_size], antialias=True).squeeze(0)
+        processed.append(t)
 
-    # Resize each frame
-    resized = TF.resize(tensor, [img_size, img_size], antialias=True)
+    tensor = torch.stack(processed, dim=0)  # [n_frames, C, H, W]
 
-    # Normalize
+    # ImageNet normalization
     mean_t = torch.tensor(mean).view(1, 3, 1, 1)
     std_t  = torch.tensor(std).view(1, 3, 1, 1)
-    normalized = (resized - mean_t) / std_t
-
-    return normalized  # [T, C, H, W]
+    return (tensor - mean_t) / std_t
 
 
 def get_gif_frame_count(gif_path: str | Path) -> int:
-    """
-    Returns the number of frames in a GIF without loading full pixel data.
-    Falls back to full decode if metadata is not available.
-    """
-    try:
-        if _IMAGEIO_AVAILABLE:
-            props = iio.improps(str(gif_path))
-            if props.n_images is not None and props.n_images > 0:
                 return props.n_images
     except Exception:
         pass
