@@ -1,0 +1,107 @@
+# =============================================================================
+# config.yaml — Central configuration for the repetition probing pipeline.
+# Edit the paths under [paths] before running on the remote server.
+# All other defaults are sensible for Phase 1 (V-JEPA2-L, balanced dataset).
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Paths — EDIT THESE for your remote server environment
+# ---------------------------------------------------------------------------
+paths:
+  # Directory containing the .gif files
+  gif_dir: "/path/to/count_gifs"
+
+  # Source CSV files (produced by split_count_qa.py)
+  zero_csv: "/path/to/Total_count_question_zero.csv"
+  nonzero_csv: "/path/to/Total_count_question_nonzero.csv"
+
+  # Root output directory for all pipeline artifacts
+  artifacts_dir: "/path/to/artifacts"
+
+# ---------------------------------------------------------------------------
+# Dataset settings
+# ---------------------------------------------------------------------------
+dataset:
+  # Balance classes by subsampling majority class (recommended for Phase 1)
+  balance: true
+
+  # Random seed for reproducibility (used in subsampling and fold assignment)
+  seed: 42
+
+  # Number of cross-validation folds
+  n_folds: 5
+
+# ---------------------------------------------------------------------------
+# Feature extraction settings
+# ---------------------------------------------------------------------------
+extraction:
+  # Number of frames to sample uniformly from each GIF
+  n_frames: 16
+
+  # Frame sampling strategy: "uniform" | "shuffle" | "center_repeat" | "reverse"
+  strategy: "uniform"
+
+  # Input spatial resolution (resize all frames to this)
+  img_size: 224
+
+  # ImageNet normalization (standard for most ViT models)
+  normalize_mean: [0.485, 0.456, 0.406]
+  normalize_std:  [0.229, 0.224, 0.225]
+
+  # Inference dtype: "float32" | "float16" (use float16 for large models to save VRAM)
+  inference_dtype: "float32"
+
+  # Batch size for model inference (reduce if OOM)
+  batch_size: 4
+
+  # Skip GIFs with fewer than this many frames
+  min_gif_frames: 8
+
+  # Pad short GIFs by looping: true = loop, false = skip
+  pad_short_gifs: true
+
+# ---------------------------------------------------------------------------
+# Model settings
+# ---------------------------------------------------------------------------
+model:
+  # HuggingFace model name for the V-JEPA2 encoder
+  # Options (verify exact IDs on HuggingFace Hub):
+  #   facebook/vjepa2-vitl-fpc64-256  (Large,  24 layers, D=1024)
+  #   facebook/vjepa2-vith-fpc64-256  (Huge,   32 layers, D=1280)
+  #   facebook/vjepa2-vitg-fpc64-256  (Giant,  40 layers, D=1408)
+  name: "facebook/vjepa2-vitl-fpc64-256"
+
+  # Short name used in artifact directory naming
+  short_name: "vjepa2_l"
+
+# ---------------------------------------------------------------------------
+# Probe training settings
+# ---------------------------------------------------------------------------
+probing:
+  # Probe depths to run: 1 = linear, 2 = MLP-2, 3 = MLP-3
+  depths: [1]
+
+  # Max training epochs per config
+  max_epochs: 1000
+
+  # Early stopping patience (epochs without improvement on val)
+  patience: 250
+
+  # Hyperparameter grid (all combinations are searched)
+  optimizers: ["adam", "adamw", "sgd"]
+  learning_rates: [1.0e-4, 3.0e-4, 1.0e-3, 3.0e-3, 5.0e-3]
+  weight_decays: [0.01, 0.1, 0.4, 0.8]
+
+  # Primary selection criterion for best hyperparams: "balanced_acc" | "roc_auc" | "accuracy"
+  selection_criterion: "balanced_acc"
+
+  # Device for probe training (probes are tiny — CPU is fine)
+  device: "cpu"
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+logging:
+  # Log to Weights & Biases: true | false
+  use_wandb: false
+  wandb_project: "vjepa2-repetition-probing"
