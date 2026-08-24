@@ -139,7 +139,7 @@ def extract_one_video(
         # V-JEPA2 expects: [batch, T, C, H, W]
         x = frames.unsqueeze(0).to(device=device, dtype=inference_dtype)
 
-        outputs = model(pixel_values=x, output_hidden_states=True)
+        outputs = model(pixel_values_videos=x, output_hidden_states=True)
 
         # hidden_states is a tuple of length (n_layers + 1):
         # index 0 = embedding output (discarded), indices 1..n_layers = transformer layers
