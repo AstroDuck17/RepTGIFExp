@@ -187,9 +187,11 @@ def _setup_wandb(
     ds_cfg   = config["dataset"]
     pad_mode = ext_cfg.get("pad_mode", "loop")
     strategy = ext_cfg["strategy"]
+    pooling  = ext_cfg.get("pooling", "spatiotemporal")
 
     # Naming: group = same experiment (all depths together), run = specific depth
-    group_name = f"{mdl_cfg['short_name']}_{strategy}_{pad_mode}pad"
+    pool_label = "" if pooling == "spatiotemporal" else f"_{pooling}pool"
+    group_name = f"{mdl_cfg['short_name']}_{strategy}_{pad_mode}pad{pool_label}"
     run_name   = f"{group_name}_depth{depth}"
 
     try:
@@ -208,6 +210,7 @@ def _setup_wandb(
                 "depth":          depth,
                 "strategy":       strategy,
                 "pad_mode":       pad_mode,
+                "pooling":        pooling,
                 "cache_name":     cache_name,
                 # Data
                 "n_videos":       n_videos,
@@ -250,12 +253,15 @@ def run_probes(
     ds_cfg  = config["dataset"]
     pad_mode  = ext_cfg.get("pad_mode", "loop")
     pad_label = "" if pad_mode == "loop" else f"_{pad_mode}pad"
+    pooling   = ext_cfg.get("pooling", "spatiotemporal")
+    pool_label = "" if pooling == "spatiotemporal" else f"_{pooling}pool"
 
     if cache_dir is None:
         cache_name = (
             f"{ext_cfg['n_frames']}f"
             f"_{ext_cfg['strategy']}"
             f"{pad_label}"
+            f"{pool_label}"
             f"_seed{ds_cfg['seed']}"
         )
         cache_dir = artifacts_dir / "features" / cache_name / mdl_cfg["short_name"]

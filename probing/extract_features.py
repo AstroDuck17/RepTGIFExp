@@ -113,6 +113,7 @@ def extract_one_video(
     std: tuple,
     min_frames: int,
     pad_mode: str,
+    pooling: str,
     device: torch.device,
     inference_dtype: torch.dtype,
     seed: int = 0,
@@ -147,10 +148,32 @@ def extract_one_video(
 
         layer_features = []
         for state in hidden_states[1:]:  # skip embedding layer (index 0)
-            pooled = state.mean(dim=1)  # [1, hidden_dim] → mean over tokens
+            if pooling == "spatiotemporal":
+                # [1, num_tokens, hidden_dim] -> [1, hidden_dim]
+                pooled = state.mean(dim=1)
+            elif pooling == "spatial":
+                # For V-JEPA2 tubelets: patch size 16.
+                # spatial_patches_per_side = img_size / 16
+                spatial_tokens = (img_size // 16) ** 2
+                # temporal_patches = n_frames / 2
+                temporal_tokens = n_frames // 2
+                hidden_dim = state.shape[-1]
+                
+                # Reshape: [1, T*H*W, D] -> [1, T, H*W, D]
+                # Tokens are laid out primarily in T, then H, W.
+                reshaped = state.view(1, temporal_tokens, spatial_tokens, hidden_dim)
+                
+                # Mean pool over the spatial dimension (dim=2) -> [1, T, D]
+                spatial_pooled = reshaped.mean(dim=2)
+                
+                # Flatten the remaining temporal tokens into a single vector -> [1, T * D]
+                pooled = spatial_pooled.view(1, temporal_tokens * hidden_dim)
+            else:
+                raise ValueError(f"Unknown pooling strategy: {pooling}")
+                
             layer_features.append(pooled.squeeze(0).float().cpu().numpy())
 
-        return np.stack(layer_features, axis=0)  # [N_layers, hidden_dim]
+        return np.stack(layer_features, axis=0)  # [N_layers, output_dim]
 
     except Exception as e:
         print(f"  ERROR extracting {gif_path}: {e}")
@@ -189,13 +212,18 @@ def extract_features(config: dict, manifest_path: Optional[str] = None, force: b
     # ── Feature cache path ─────────────────────────────────────────
     pad_mode  = ext_cfg.get("pad_mode", "loop")  # default "loop" preserves baseline
     pad_label = "" if pad_mode == "loop" else f"_{pad_mode}pad"
+    pooling   = ext_cfg.get("pooling", "spatiotemporal")
+    pool_label = "" if pooling == "spatiotemporal" else f"_{pooling}pool"
+    
     cache_name = (
         f"{ext_cfg['n_frames']}f"
         f"_{ext_cfg['strategy']}"
         f"{pad_label}"
+        f"{pool_label}"
         f"_seed{config['dataset']['seed']}"
     )
     print(f"  Pad mode   : {pad_mode}")
+    print(f"  Pooling    : {pooling}")
     print(f"  Cache name : {cache_name}")
     cache_dir = artifacts_dir / "features" / cache_name / mdl_cfg["short_name"]
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -215,10 +243,14 @@ def extract_features(config: dict, manifest_path: Optional[str] = None, force: b
     model = model.to(device)
 
     print(f"  N_layers   : {n_layers}  (probing layers 1..{n_layers})")
-    print(f"  Hidden dim : {hidden_dim}")
+    
+    output_dim = hidden_dim
+    if pooling == "spatial":
+        output_dim = hidden_dim * (ext_cfg["n_frames"] // 2)
+    print(f"  Output dim : {output_dim} (per layer)")
 
     # ── Initialize or resume feature array ────────────────────────
-    expected_shape = (N, n_layers, hidden_dim)
+    expected_shape = (N, n_layers, output_dim)
     done_mask = np.zeros(N, dtype=bool)
 
     if cache_path.exists() and done_mask_path.exists() and not force:
@@ -261,6 +293,7 @@ def extract_features(config: dict, manifest_path: Optional[str] = None, force: b
             std=tuple(ext_cfg["normalize_std"]),
             min_frames=ext_cfg["min_gif_frames"],
             pad_mode=pad_mode,
+            pooling=pooling,
             device=device,
             inference_dtype=inference_dtype,
             # Shuffle ablation: per-video seed so each video gets a unique
@@ -314,8 +347,10 @@ def extract_features(config: dict, manifest_path: Optional[str] = None, force: b
         "n_frames":      ext_cfg["n_frames"],
         "strategy":      ext_cfg["strategy"],
         "pad_mode":      pad_mode,
+        "pooling":       pooling,
         "img_size":      ext_cfg["img_size"],
         "inference_dtype": ext_cfg["inference_dtype"],
+        "output_dim":    int(output_dim),
         "cache_path":    str(cache_path),
     }
     with open(cache_dir / "extraction_meta.json", "w") as f:

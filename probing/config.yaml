@@ -38,11 +38,16 @@ extraction:
   # Number of frames to sample uniformly from each GIF
   n_frames: 16
 
-  # Frame sampling strategy: "uniform" | "shuffle" | "center_repeat" | "reverse"
+  # Frame sampling strategy: "uniform" | "shuffle"  # Strategy for sampling 16 frames: "uniform" or "shuffle"
   strategy: "uniform"
 
-  # Input spatial resolution (resize all frames to this)
-  img_size: 224
+  # Resize spatial dimensions (H, W) to this size
+  img_size: 256
+
+  # Pooling strategy over V-JEPA2 tubelet tokens
+  # "spatiotemporal" -> pool over all tokens (default)
+  # "spatial"        -> pool only over spatial tokens, preserving temporal dimension
+  pooling: "spatiotemporal"
 
   # ImageNet normalization (standard for most ViT models)
   normalize_mean: [0.485, 0.456, 0.406]
