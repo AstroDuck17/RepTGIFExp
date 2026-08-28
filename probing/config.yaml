@@ -57,8 +57,12 @@ extraction:
   # Skip GIFs with fewer than this many frames
   min_gif_frames: 8
 
-  # Pad short GIFs by looping: true = loop, false = skip
-  pad_short_gifs: true
+  # How to handle GIFs shorter than min_gif_frames:
+  #   "last_frame"  — freeze the final frame to fill the gap (RECOMMENDED for counting tasks)
+  #                   safe: no new action is introduced, so labels remain valid
+  #   "loop"        — repeat from the start (legacy behaviour, can corrupt counting labels)
+  #   "none"        — skip these GIFs entirely (cleanest, but loses a few samples)
+  pad_mode: "last_frame"
 
 # ---------------------------------------------------------------------------
 # Model settings
@@ -95,8 +99,8 @@ probing:
   # Primary selection criterion for best hyperparams: "balanced_acc" | "roc_auc" | "accuracy"
   selection_criterion: "balanced_acc"
 
-  # Device for probe training (probes are tiny — CPU is fine)
-  device: "cpu"
+  # Device for probe training
+  device: "cuda"
 
 # ---------------------------------------------------------------------------
 # Logging

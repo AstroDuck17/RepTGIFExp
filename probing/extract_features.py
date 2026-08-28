@@ -112,7 +112,7 @@ def extract_one_video(
     mean: tuple,
     std: tuple,
     min_frames: int,
-    pad_short: bool,
+    pad_mode: str,
     device: torch.device,
     inference_dtype: torch.dtype,
     seed: int = 0,
@@ -132,7 +132,7 @@ def extract_one_video(
             mean=mean,
             std=std,
             min_frames=min_frames,
-            pad_short=pad_short,
+            pad_mode=pad_mode,
             seed=seed,
         )
         # frames: [T, C, H, W] float32
@@ -187,11 +187,16 @@ def extract_features(config: dict, manifest_path: Optional[str] = None, force: b
     print(f"  Model      : {mdl_cfg['name']}")
 
     # ── Feature cache path ─────────────────────────────────────────
+    pad_mode  = ext_cfg.get("pad_mode", "loop")  # default "loop" preserves baseline
+    pad_label = "" if pad_mode == "loop" else f"_{pad_mode}pad"
     cache_name = (
         f"{ext_cfg['n_frames']}f"
         f"_{ext_cfg['strategy']}"
+        f"{pad_label}"
         f"_seed{config['dataset']['seed']}"
     )
+    print(f"  Pad mode   : {pad_mode}")
+    print(f"  Cache name : {cache_name}")
     cache_dir = artifacts_dir / "features" / cache_name / mdl_cfg["short_name"]
     cache_dir.mkdir(parents=True, exist_ok=True)
     cache_path      = cache_dir / "pooled.npy"
@@ -255,10 +260,16 @@ def extract_features(config: dict, manifest_path: Optional[str] = None, force: b
             mean=tuple(ext_cfg["normalize_mean"]),
             std=tuple(ext_cfg["normalize_std"]),
             min_frames=ext_cfg["min_gif_frames"],
-            pad_short=ext_cfg["pad_short_gifs"],
+            pad_mode=pad_mode,
             device=device,
             inference_dtype=inference_dtype,
-            seed=config["dataset"]["seed"],
+            # Shuffle ablation: per-video seed so each video gets a unique
+            # but reproducible permutation. Fixed seed for all other strategies.
+            seed=(
+                config["dataset"]["seed"] + row.row_index
+                if ext_cfg["strategy"] == "shuffle"
+                else config["dataset"]["seed"]
+            ),
         )
 
         if row_feat is not None:
@@ -302,6 +313,7 @@ def extract_features(config: dict, manifest_path: Optional[str] = None, force: b
         "n_fail":        n_fail,
         "n_frames":      ext_cfg["n_frames"],
         "strategy":      ext_cfg["strategy"],
+        "pad_mode":      pad_mode,
         "img_size":      ext_cfg["img_size"],
         "inference_dtype": ext_cfg["inference_dtype"],
         "cache_path":    str(cache_path),

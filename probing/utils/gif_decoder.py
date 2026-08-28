@@ -141,6 +141,9 @@ def sample_frame_indices(
     return indices
 
 
+PadMode = Literal["loop", "last_frame", "none"]
+
+
 def load_gif(
     gif_path: str | Path,
     n_frames: int = 16,
@@ -149,7 +152,7 @@ def load_gif(
     mean: tuple[float, ...] = (0.485, 0.456, 0.406),
     std: tuple[float, ...] = (0.229, 0.224, 0.225),
     min_frames: int = 8,
-    pad_short: bool = True,
+    pad_mode: str = "last_frame",
     seed: int | None = None,
 ) -> "torch.Tensor":
     """
@@ -157,6 +160,11 @@ def load_gif(
 
     Each selected frame is resized INDIVIDUALLY to img_size x img_size before
     stacking. This correctly handles variable-size GIF frames.
+
+    Padding modes for GIFs shorter than min_frames:
+        "last_frame"  — repeat the final frame (no new motion introduced). ✅ Recommended.
+        "loop"        — loop the video from the start (can create false repetitions).
+        "none"        — raise ValueError and let the caller skip this video.
 
     Returns:
         Float32 tensor of shape [n_frames, C, H, W], normalized with ImageNet stats.
@@ -170,14 +178,22 @@ def load_gif(
     frames_list = load_gif_frames_raw(gif_path)  # list of [H_i, W_i, 3] uint8
     T = len(frames_list)
 
-    # Handle short GIFs
+    # Handle GIFs shorter than the required minimum
     if T < min_frames:
-        if not pad_short:
+        if pad_mode == "none":
             raise ValueError(f"GIF has only {T} frames (min={min_frames}): {gif_path}")
-        # Loop-pad by repeating from start until we have enough frames
-        while len(frames_list) < min_frames:
-            frames_list = frames_list + frames_list
-        frames_list = frames_list[:min_frames]
+        elif pad_mode == "last_frame":
+            # Freeze final frame — safe for counting tasks: no new action is introduced
+            last_frame = frames_list[-1]
+            while len(frames_list) < min_frames:
+                frames_list.append(last_frame)
+        elif pad_mode == "loop":
+            # Loop from start — can introduce false repetitions for non-repeating GIFs
+            while len(frames_list) < min_frames:
+                frames_list = frames_list + frames_list
+            frames_list = frames_list[:min_frames]
+        else:
+            raise ValueError(f"Unknown pad_mode: '{pad_mode}'. Choose from: last_frame, loop, none")
         T = len(frames_list)
 
     indices = sample_frame_indices(T, n_frames, strategy, seed)

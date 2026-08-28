@@ -417,17 +417,42 @@ def _plot_layer_curve(layer_summary: pd.DataFrame, out_dir: Path, model_name: st
 # ---------------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(description="Train layer-wise probes on cached V-JEPA2 features.")
-    parser.add_argument("--config",    "-c", default="config.yaml", help="Path to config.yaml")
-    parser.add_argument("--depth",     "-d", type=int, default=1,   help="Probe depth (1=linear, 2=MLP-2)")
-    parser.add_argument("--cache-dir", "-f", default=None,          help="Override feature cache directory")
+    parser = argparse.ArgumentParser(
+        description="Train layer-wise probes on cached V-JEPA2 features.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Linear probe only
+  python run_probes.py --config config.yaml --depth 1
+
+  # Linear + MLP-2 in one run (features loaded once, probes trained sequentially)
+  python run_probes.py --config config.yaml --depth 1 2
+
+  # MLP-2 and MLP-3
+  python run_probes.py --config config.yaml --depth 2 3
+        """,
+    )
+    parser.add_argument("--config",    "-c", default="config.yaml",
+                        help="Path to config.yaml")
+    parser.add_argument("--depth",     "-d", type=int, nargs="+", default=None,
+                        help="Probe depth(s) to run: 1=linear, 2=MLP-2, 3=MLP-3. "
+                             "Pass multiple values to run all depths in sequence "
+                             "(e.g. --depth 1 2). Defaults to config probing.depths.")
+    parser.add_argument("--cache-dir", "-f", default=None,
+                        help="Override feature cache directory")
     args = parser.parse_args()
 
     with open(args.config, "r") as f:
         config = yaml.safe_load(f)
 
+    # Resolve which depths to run:
+    # CLI --depth takes priority; fall back to config["probing"]["depths"]
+    depths = args.depth or config.get("probing", {}).get("depths", [1])
     cache_dir = Path(args.cache_dir) if args.cache_dir else None
-    run_probes(config, depth=args.depth, cache_dir=cache_dir)
+
+    print(f"Running probes for depth(s): {depths}")
+    for depth in depths:
+        run_probes(config, depth=depth, cache_dir=cache_dir)
 
 
 if __name__ == "__main__":
