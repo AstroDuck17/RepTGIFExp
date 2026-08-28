@@ -152,6 +152,87 @@ def train_probe_config(
 
 
 # ---------------------------------------------------------------------------
+# W&B helper
+# ---------------------------------------------------------------------------
+
+def _setup_wandb(
+    config: dict,
+    mdl_cfg: dict,
+    depth: int,
+    out_dir: Path,
+    cache_name: str,
+    n_videos: int,
+    n_layers: int,
+    hidden_dim: int,
+):
+    """
+    Initialise a Weights & Biases run for one (model, experiment, depth) probe job.
+
+    Returns the wandb.Run object, or None if W&B is disabled / not installed.
+    All W&B calls in run_probes() are gated on `if wandb_run is not None`, so
+    the rest of the pipeline is completely unaffected when W&B is off.
+    """
+    log_cfg = config.get("logging", {})
+    if not log_cfg.get("use_wandb", False):
+        return None
+
+    try:
+        import wandb
+    except ImportError:
+        print("[W&B] wandb not installed — skipping logging. Install with: pip install wandb")
+        return None
+
+    ext_cfg  = config["extraction"]
+    pr_cfg   = config["probing"]
+    ds_cfg   = config["dataset"]
+    pad_mode = ext_cfg.get("pad_mode", "loop")
+    strategy = ext_cfg["strategy"]
+
+    # Naming: group = same experiment (all depths together), run = specific depth
+    group_name = f"{mdl_cfg['short_name']}_{strategy}_{pad_mode}pad"
+    run_name   = f"{group_name}_depth{depth}"
+
+    try:
+        run = wandb.init(
+            project  = log_cfg.get("wandb_project", "vjepa2-repetition-probing"),
+            entity   = log_cfg.get("wandb_entity") or None,
+            name     = run_name,
+            group    = group_name,
+            job_type = f"depth{depth}",
+            dir      = str(out_dir),
+            reinit   = True,
+            config   = {
+                # Experiment identity
+                "model":          mdl_cfg["name"],
+                "model_short":    mdl_cfg["short_name"],
+                "depth":          depth,
+                "strategy":       strategy,
+                "pad_mode":       pad_mode,
+                "cache_name":     cache_name,
+                # Data
+                "n_videos":       n_videos,
+                "n_layers":       n_layers,
+                "hidden_dim":     hidden_dim,
+                "n_frames":       ext_cfg["n_frames"],
+                "img_size":       ext_cfg.get("img_size", 224),
+                "n_folds":        ds_cfg["n_folds"],
+                "seed":           ds_cfg["seed"],
+                # Probe training
+                "max_epochs":     pr_cfg["max_epochs"],
+                "patience":       pr_cfg["patience"],
+                "optimizers":     pr_cfg["optimizers"],
+                "learning_rates": pr_cfg["learning_rates"],
+                "weight_decays":  pr_cfg["weight_decays"],
+            },
+        )
+        print(f"[W&B] Run initialised: {run.url}")
+        return run
+    except Exception as e:
+        print(f"[W&B] Failed to initialise run: {e}  — continuing without W&B.")
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Main probing loop
 # ---------------------------------------------------------------------------
 
@@ -165,15 +246,22 @@ def run_probes(
     mdl_cfg       = config["model"]
 
     # ── Locate feature cache ───────────────────────────────────────
+    ext_cfg = config["extraction"]
+    ds_cfg  = config["dataset"]
+    pad_mode  = ext_cfg.get("pad_mode", "loop")
+    pad_label = "" if pad_mode == "loop" else f"_{pad_mode}pad"
+
     if cache_dir is None:
-        ds_cfg = config["dataset"]
-        ext_cfg = config["extraction"]
         cache_name = (
             f"{ext_cfg['n_frames']}f"
             f"_{ext_cfg['strategy']}"
+            f"{pad_label}"
             f"_seed{ds_cfg['seed']}"
         )
         cache_dir = artifacts_dir / "features" / cache_name / mdl_cfg["short_name"]
+    else:
+        # Reconstruct cache_name from the supplied path for metadata/W&B
+        cache_name = cache_dir.parent.name
 
     features, feat_meta = load_features(cache_dir)
     N, N_layers, D = features.shape
@@ -194,6 +282,9 @@ def run_probes(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     device = pr_cfg.get("device", "cpu")
+
+    # ── W&B init ───────────────────────────────────────────────────
+    wandb_run = _setup_wandb(config, mdl_cfg, depth, out_dir, cache_name, N, N_layers, D)
 
     print(f"\n{'=' * 60}")
     print(f"  RUN PROBES — {mdl_cfg['short_name'].upper()} | depth={depth}")
@@ -320,13 +411,27 @@ def run_probes(
             layer_fold_metrics.append(test_metrics)
 
         # Print layer summary
-        bal_accs = [m["balanced_acc"] for m in layer_fold_metrics]
-        aucs     = [m["roc_auc"] for m in layer_fold_metrics]
+        bal_accs  = [m["balanced_acc"] for m in layer_fold_metrics]
+        aucs      = [m["roc_auc"]      for m in layer_fold_metrics]
+        accs      = [m["accuracy"]     for m in layer_fold_metrics]
+        bce_vals  = [m["bce_loss"]     for m in layer_fold_metrics]
         print(
             f"  Layer {layer_idx:3d} (f={layer_fraction:.2f}) | "
             f"bal_acc={np.mean(bal_accs):.4f}±{np.std(bal_accs):.4f}  "
             f"auc={np.mean(aucs):.4f}"
         )
+
+        # ── W&B: per-layer step logging ────────────────────────────
+        if wandb_run is not None:
+            wandb_run.log({
+                "layer/fraction":          layer_fraction,
+                "layer/balanced_acc_mean": np.mean(bal_accs),
+                "layer/balanced_acc_std":  np.std(bal_accs),
+                "layer/roc_auc_mean":      np.mean(aucs),
+                "layer/roc_auc_std":       np.std(aucs),
+                "layer/accuracy_mean":     np.mean(accs),
+                "layer/bce_loss_mean":     np.mean(bce_vals),
+            }, step=layer_idx)
 
     # ── Aggregate results ──────────────────────────────────────────
     results_df = pd.DataFrame(fold_layer_rows)
@@ -376,6 +481,33 @@ def run_probes(
 
     # Plot
     _plot_layer_curve(layer_summary, out_dir, mdl_cfg["short_name"], depth)
+
+    # ── W&B: end-of-run logging ────────────────────────────────────
+    if wandb_run is not None:
+        try:
+            import wandb
+
+            # Upload the layer curve image
+            curve_path = out_dir / "layer_curve.png"
+            if curve_path.exists():
+                wandb_run.log({"layer_curve": wandb.Image(str(curve_path))})
+
+            # Log full fold×layer results as a searchable W&B Table
+            wandb_run.log({"fold_layer_results": wandb.Table(dataframe=results_df)})
+
+            # Log per-layer summary (mean±std) as a Table
+            wandb_run.log({"layer_summary": wandb.Table(dataframe=layer_summary)})
+
+            # Set key metrics in the run summary (shown in W&B run list)
+            wandb_run.summary["peak_balanced_acc"]   = summary["peak_balanced_acc"]
+            wandb_run.summary["peak_layer_fraction"] = summary["peak_layer_fraction"]
+            wandb_run.summary["peak_layer_idx"]      = summary["peak_layer_idx"]
+            wandb_run.summary["total_time_min"]      = summary["total_time_min"]
+
+            wandb_run.finish()
+            print(f"W&B run finished: {wandb_run.url}")
+        except Exception as e:
+            print(f"[W&B] Error during final logging: {e}")
 
     return results_df, layer_summary, summary
 

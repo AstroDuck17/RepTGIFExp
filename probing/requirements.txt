@@ -44,3 +44,7 @@ imageio-ffmpeg>=0.4.9
 
 # ── Plotting (plot_curves.py, run_probes.py) ─────────────────────────────────
 matplotlib>=3.7.0
+
+# ── Experiment tracking (run_probes.py) ──────────────────────────────────────
+# Set logging.use_wandb: true in config.yaml to enable.
+wandb>=0.17.0

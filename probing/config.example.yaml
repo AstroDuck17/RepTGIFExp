@@ -106,6 +106,12 @@ probing:
 # Logging
 # ---------------------------------------------------------------------------
 logging:
-  # Log to Weights & Biases: true | false
+  # Set to true to log probe results to Weights & Biases
   use_wandb: false
+
+  # W&B project name (created automatically if it doesn't exist)
   wandb_project: "vjepa2-repetition-probing"
+
+  # W&B entity (your username or team name).
+  # Leave as null to use your default W&B account.
+  wandb_entity: null
