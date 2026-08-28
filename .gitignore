@@ -17,7 +17,7 @@ env/
 # ── Local config (contains server-specific paths) ─────────
 # Copy config.example.yaml → config.yaml and fill in your paths.
 # config.yaml is NEVER committed — each server has its own copy.
-probing/config.yaml
+# probing/config.yaml
 
 # ── Pipeline artifacts (large binary files) ───────────────
 probing/artifacts/
