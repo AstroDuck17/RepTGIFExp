@@ -1,6 +1,7 @@
 import yaml
 import subprocess
 import os
+import sys
 
 EXPERIMENTS = [
     {
@@ -80,12 +81,12 @@ def main():
 
         # 1. Extract Features
         print(f"\n--- Running feature extraction for {exp['name']} ---")
-        cmd_extract = ["python", "extract_features.py", "--config", temp_config_path]
+        cmd_extract = [sys.executable, "extract_features.py", "--config", temp_config_path]
         subprocess.run(cmd_extract, check=True)
 
         # 2. Run Probes
         print(f"\n--- Running probes for {exp['name']} (depths {exp['depths']}) ---")
-        cmd_probes = ["python", "run_probes.py", "--config", temp_config_path, "--depth"] + exp["depths"]
+        cmd_probes = [sys.executable, "run_probes.py", "--config", temp_config_path, "--depth"] + exp["depths"]
         subprocess.run(cmd_probes, check=True)
 
     # Cleanup
