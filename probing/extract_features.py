@@ -306,7 +306,7 @@ def extract_features(config: dict, manifest_path: Optional[str] = None, force: b
         )
 
         if row_feat is not None:
-            assert row_feat.shape == (n_layers, hidden_dim), \
+            assert row_feat.shape == (n_layers, output_dim), \
                 f"Unexpected shape {row_feat.shape} for video {row.gif_name}"
             features[row.row_index] = row_feat
             done_mask[row.row_index] = True
