@@ -97,7 +97,19 @@ def bce_loss(y_true: np.ndarray, y_prob: np.ndarray, eps: float = 1e-7) -> float
 
 def sigmoid(x: np.ndarray) -> np.ndarray:
     """Numerically stable sigmoid."""
-    return np.where(x >= 0, 1 / (1 + np.exp(-x)), np.exp(x) / (1 + np.exp(x)))
+    x = np.asarray(x, dtype=float)
+    out = np.zeros_like(x)
+    
+    pos = (x >= 0)
+    neg = ~pos
+    
+    # Evaluate positive and negative branches completely separately
+    # so np.exp() never evaluates the extreme values that cause overflow warnings.
+    out[pos] = 1 / (1 + np.exp(-x[pos]))
+    exp_neg = np.exp(x[neg])
+    out[neg] = exp_neg / (1 + exp_neg)
+    
+    return out
 
 
 def compute_all_metrics(
