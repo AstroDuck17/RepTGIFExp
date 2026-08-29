@@ -4,39 +4,39 @@ import os
 import sys
 
 EXPERIMENTS = [
-    {
-        "name": "Exp 1: Baseline Loop",
-        "overrides": {
-            "extraction": {
-                "pad_mode": "loop",
-                "strategy": "uniform",
-                "pooling": "spatiotemporal"
-            }
-        },
-        "depths": ["1", "2"]
-    },
-    {
-        "name": "Exp 2: Static Padding",
-        "overrides": {
-            "extraction": {
-                "pad_mode": "last_frame",
-                "strategy": "uniform",
-                "pooling": "spatiotemporal"
-            }
-        },
-        "depths": ["1", "2"]
-    },
-    {
-        "name": "Exp 3: Shuffle Ablation",
-        "overrides": {
-            "extraction": {
-                "pad_mode": "last_frame",
-                "strategy": "shuffle",
-                "pooling": "spatiotemporal"
-            }
-        },
-        "depths": ["1", "2"]
-    },
+    # {
+    #     "name": "Exp 1: Baseline Loop",
+    #     "overrides": {
+    #         "extraction": {
+    #             "pad_mode": "loop",
+    #             "strategy": "uniform",
+    #             "pooling": "spatiotemporal"
+    #         }
+    #     },
+    #     "depths": ["1", "2"]
+    # },
+    # {
+    #     "name": "Exp 2: Static Padding",
+    #     "overrides": {
+    #         "extraction": {
+    #             "pad_mode": "last_frame",
+    #             "strategy": "uniform",
+    #             "pooling": "spatiotemporal"
+    #         }
+    #     },
+    #     "depths": ["1", "2"]
+    # },
+    # {
+    #     "name": "Exp 3: Shuffle Ablation",
+    #     "overrides": {
+    #         "extraction": {
+    #             "pad_mode": "last_frame",
+    #             "strategy": "shuffle",
+    #             "pooling": "spatiotemporal"
+    #         }
+    #     },
+    #     "depths": ["1", "2"]
+    # },
     {
         "name": "Exp 4: Spatial Only",
         "overrides": {
